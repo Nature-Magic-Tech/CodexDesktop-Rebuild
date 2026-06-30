@@ -1,0 +1,64 @@
+trigger: none
+pr:
+  branches:
+    include:
+      - master
+
+parameters:
+  - name: forceSync
+    displayName: Force upstream sync
+    type: boolean
+    default: true
+
+pool:
+  vmImage: macOS-latest
+
+variables:
+  NODE_VERSION: '24.x'
+
+jobs:
+  - job: macOS
+    displayName: Build macOS DMG
+    timeoutInMinutes: 90
+    strategy:
+      matrix:
+        x64:
+          ARCH: x64
+        arm64:
+          ARCH: arm64
+    steps:
+      - checkout: self
+        clean: true
+
+      - task: NodeTool@0
+        displayName: Use Node $(NODE_VERSION)
+        inputs:
+          versionSpec: $(NODE_VERSION)
+
+      - script: npm ci
+        displayName: Install dependencies
+
+      - script: brew install --quiet sevenzip || true
+        displayName: Install 7zip
+
+      - script: node scripts/sync-upstream.js --force --skip-win
+        displayName: Sync upstream macOS assets
+
+      - script: node scripts/patch-all.js mac-$(ARCH)
+        displayName: Patch macOS $(ARCH)
+
+      - script: npm run build:mac-$(ARCH)
+        displayName: Build macOS $(ARCH) DMG
+
+      - script: |
+          set -euo pipefail
+          mkdir -p "$(Build.ArtifactStagingDirectory)/Codex-macOS-$(ARCH)"
+          find out -name '*.dmg' -print -exec cp {} "$(Build.ArtifactStagingDirectory)/Codex-macOS-$(ARCH)/" \;
+          test -n "$(find "$(Build.ArtifactStagingDirectory)/Codex-macOS-$(ARCH)" -name '*.dmg' -print -quit)"
+        displayName: Stage DMG artifact
+
+      - task: PublishPipelineArtifact@1
+        displayName: Publish Codex-macOS-$(ARCH)
+        inputs:
+          targetPath: '$(Build.ArtifactStagingDirectory)/Codex-macOS-$(ARCH)'
+          artifactName: 'Codex-macOS-$(ARCH)'
